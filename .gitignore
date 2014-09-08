@@ -1,0 +1,7 @@
+*.o
+kernel
+loadFile
+*.txt
+*.img
+tstprg
+tstpr2

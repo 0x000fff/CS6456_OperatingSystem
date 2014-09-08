@@ -8,6 +8,8 @@ int myDIV(int dividend, int divisor);
 int myMOD(int dividend, int divisor);
 void directory();
 void deleteFile(char* filename);
+void readFile (char* filename, char* outbuf);
+void writeFile (char* filename, char* inbuf);
 void handleInterrupt21 (int AX, int BX, int CX, int DX);
 
 // interrupt() usage:
@@ -15,10 +17,12 @@ void handleInterrupt21 (int AX, int BX, int CX, int DX);
 
 void main()
 {
+	char buffer[13312]; /*this is the maximum size of a file*/
 	makeInterrupt21();
-	interrupt(0x21, 3, 0,0,0); 		/*directory*/
-	interrupt(0x21, 4, "messag", 0, 0); 	/*delete the file*/
-	interrupt(0x21, 3, 0,0,0); 		/*directory*/
+	interrupt(0x21, 3, 0,0,0); /*directory*/
+	interrupt(0x21, 6, "messag", buffer, 0); /*read the file into buffer*/
+	interrupt(0x21, 8, "c_mess", buffer, 0); /*write the file*/
+	interrupt(0x21, 3, 0,0,0); /*directory*/
 	while(1);
 }
 
@@ -144,6 +148,7 @@ void directory()
 void deleteFile(char* filename)
 {
 	char mapbuf[512], dirbuf[512];
+	// use static to initialize with all zero
 	static char zerobuf[512];
 	int i, j;
 	// load map and directory into buffer
@@ -179,6 +184,71 @@ void deleteFile(char* filename)
 	writeSector(dirbuf, 2);
 }
 
+void readFile (char* filename, char* outbuf)
+{
+	char dirbuf[512];
+	int i, j, m=0;
+	// load map and directory into buffer
+	readSector(dirbuf, 2);
+	for(i=0; i<512; i+=32)
+	{
+		// search filename in directory
+		if(dirbuf[i] == filename[0] && \
+		   dirbuf[i+1] == filename[1] && \
+		   dirbuf[i+2] == filename[2] && \
+		   dirbuf[i+3] == filename[3] && \
+		   dirbuf[i+4] == filename[4] && \
+		   dirbuf[i+5] == filename[5])
+		{
+			// find occupied sector
+			for(j=i+6; j<(i+32); j++)
+			{
+				if(dirbuf[j] != 0)
+				{
+					readSector((outbuf+m*512), dirbuf[j]);
+					m++;
+				}
+			}
+		}
+	}
+}
+
+void writeFile(char* filename, char* inbuf)
+{
+	char mapbuf[512], dirbuf[512];
+	int i, j, n;
+	// load map and directory into buffer
+	readSector(mapbuf, 1);
+	readSector(dirbuf, 2);
+	// search for available sectors
+	for(n=0; n<512; n++)
+	{
+		if(mapbuf[n] == 0)
+		{
+			mapbuf[n] = 0xFF;
+			break;
+		}
+	}
+	// search for available file entry in directory
+	for(i=0; i<512; i+=32)
+	{
+		if(dirbuf[i] == 0)
+			break;
+	}
+	// write filename into directory
+	for(j=i; j<(i+6); j++)
+	{
+		dirbuf[j] = filename[j-i];
+	}
+	// write the occupied sector into file entry
+	dirbuf[j+1] = n;
+
+	writeSector(mapbuf, 1);
+	writeSector(dirbuf, 2);
+	// write data into corresponding sector
+	writeSector(inbuf, dirbuf[j+1]);
+}
+
 void handleInterrupt21(int AX, int BX, int CX, int DX)
 {
 	switch(AX)
@@ -198,6 +268,16 @@ void handleInterrupt21(int AX, int BX, int CX, int DX)
 			break;
 		case 4:
 			deleteFile(BX);
+			break;
+		case 6:
+			// BX is filename, CX is buffer pointer
+			readFile(BX, CX);
+			break;
+		case 7:
+			writeSector(BX, CX);
+			break;
+		case 8:
+			writeFile(BX, CX);
 			break;
 		default:
 			printString("Syscall not supported");

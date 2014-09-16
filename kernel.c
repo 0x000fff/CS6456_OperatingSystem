@@ -8,21 +8,18 @@ int myDIV(int dividend, int divisor);
 int myMOD(int dividend, int divisor);
 void directory();
 void deleteFile(char* filename);
-void readFile (char* filename, char* outbuf);
-void writeFile (char* filename, char* inbuf);
-void handleInterrupt21 (int AX, int BX, int CX, int DX);
+void readFile(char* filename, char* outbuf);
+void writeFile(char* filename, char* inbuf);
+void handleInterrupt21(int AX, int BX, int CX, int DX);
+void executeProgram(char* name, int segment);
 
 // interrupt() usage:
 // int interrupt (int number, int AX, int BX, int CX, int DX)
 
 void main()
 {
-	char buffer[13312]; /*this is the maximum size of a file*/
-	makeInterrupt21();
-	interrupt(0x21, 3, 0,0,0); /*directory*/
-	interrupt(0x21, 6, "messag", buffer, 0); /*read the file into buffer*/
-	interrupt(0x21, 8, "c_mess", buffer, 0); /*write the file*/
-	interrupt(0x21, 3, 0,0,0); /*directory*/
+    makeInterrupt21();
+    interrupt(0x21, 9, "tstprg", 0x2000, 0);
 	while(1);
 }
 
@@ -80,7 +77,7 @@ void readString(char buffer[])
 void readSector(char* buffer, int sector)
 {
 	int AX, CX, DX;
-	
+
 	AX = 2*256 + 1;
 	CX = myDIV(sector, 36)*256 + ( myMOD(sector, 18) + 1 );
 	DX = myMOD(myDIV(sector, 18), 2)*256 + 0;
@@ -90,7 +87,7 @@ void readSector(char* buffer, int sector)
 void writeSector(char* buffer, int sector)
 {
 	int AX, CX, DX;
-	
+
 	AX = 3*256 + 1;
 	CX = myDIV(sector, 36)*256 + ( myMOD(sector, 18) + 1 );
 	DX = myMOD(myDIV(sector, 18), 2)*256 + 0;
@@ -184,7 +181,7 @@ void deleteFile(char* filename)
 	writeSector(dirbuf, 2);
 }
 
-void readFile (char* filename, char* outbuf)
+void readFile(char* filename, char* outbuf)
 {
 	char dirbuf[512];
 	int i, j, m=0;
@@ -249,6 +246,12 @@ void writeFile(char* filename, char* inbuf)
 	writeSector(inbuf, dirbuf[j+1]);
 }
 
+void executeProgram(char* name, int segment)
+{
+    char filebuf[512];
+    readFile(name, filebuf);
+}
+
 void handleInterrupt21(int AX, int BX, int CX, int DX)
 {
 	switch(AX)
@@ -278,6 +281,9 @@ void handleInterrupt21(int AX, int BX, int CX, int DX)
 			break;
 		case 8:
 			writeFile(BX, CX);
+			break;
+		case 9:
+			executeProgram(BX, CX);
 			break;
 		default:
 			printString("Syscall not supported");

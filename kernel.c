@@ -249,7 +249,12 @@ void writeFile(char* filename, char* inbuf)
 void executeProgram(char* name, int segment)
 {
     char filebuf[512];
+    int i;
     readFile(name, filebuf);
+    for(i=0; i<512; i++) {
+        putInMemory(segment, i, filebuf[i]);
+    }
+    launchProgram(segment);
 }
 
 void handleInterrupt21(int AX, int BX, int CX, int DX)

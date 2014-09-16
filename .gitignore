@@ -5,4 +5,4 @@ loadFile
 *.img
 tstprg
 tstpr2
-ctags
+tags

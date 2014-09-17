@@ -12,6 +12,7 @@ void readFile(char* filename, char* outbuf);
 void writeFile(char* filename, char* inbuf);
 void handleInterrupt21(int AX, int BX, int CX, int DX);
 void executeProgram(char* name, int segment);
+void terminate();
 
 // interrupt() usage:
 // int interrupt (int number, int AX, int BX, int CX, int DX)
@@ -19,7 +20,7 @@ void executeProgram(char* name, int segment);
 void main()
 {
     makeInterrupt21();
-    interrupt(0x21, 9, "tstprg", 0x2000, 0);
+    interrupt(0x21, 9, "shell", 0x2000, 0);
 	while(1);
 }
 
@@ -34,8 +35,8 @@ void printString(char* str)
 	}
 
 	// start a new line before printing, use CRLF
-	interrupt(0x10, 0xe*256+0xd, 0, 0, 0);
-	interrupt(0x10, 0xe*256+0xa, 0, 0, 0);
+	//interrupt(0x10, 0xe*256+0xd, 0, 0, 0);
+	//interrupt(0x10, 0xe*256+0xa, 0, 0, 0);
 }
 
 void readString(char buffer[])
@@ -142,36 +143,37 @@ void directory()
 	}
 }
 
+// deleteFile supports multi-sector storage
 void deleteFile(char* filename)
 {
 	char mapbuf[512], dirbuf[512];
 	// use static to initialize with all zero
 	static char zerobuf[512];
-	int i, j;
+	int i, j, n;
 	// load map and directory into buffer
 	readSector(mapbuf, 1);
 	readSector(dirbuf, 2);
 	for(i=0; i<512; i+=32)
 	{
 		// search filename in directory
-		if(dirbuf[i] == filename[0] && \
-		   dirbuf[i+1] == filename[1] && \
-		   dirbuf[i+2] == filename[2] && \
-		   dirbuf[i+3] == filename[3] && \
-		   dirbuf[i+4] == filename[4] && \
-		   dirbuf[i+5] == filename[5])
+		if(dirbuf[i] == filename[0] && dirbuf[i+1] == filename[1] && \
+		   dirbuf[i+2] == filename[2] && dirbuf[i+3] == filename[3] && \
+           dirbuf[i+4] == filename[4] && dirbuf[i+5] == filename[5])
 		{
-			// delete file entry in directory
-			dirbuf[i] = 0;
+			// delete file name in entry in directory
+            for(n=i; n<(i+6); n++)
+            {
+                dirbuf[n] = 0x00;
+            }
 			// find occupied sector
 			for(j=i+6; j<(i+32); j++)
 			{
 				// erase corresponding sector
-				if(dirbuf[j] != 0)
+				if(dirbuf[j] != 0x00)
 				{
 					writeSector(zerobuf, dirbuf[j]);
 					// update map in sector #1
-					mapbuf[dirbuf[j]] = 0;
+					mapbuf[dirbuf[j]] = 0x00;
 				}
 			}
 		}
@@ -181,51 +183,63 @@ void deleteFile(char* filename)
 	writeSector(dirbuf, 2);
 }
 
+// readFile supports multi-sector storage
 void readFile(char* filename, char* outbuf)
 {
 	char dirbuf[512];
-	int i, j, m=0;
-	// load map and directory into buffer
+	int i, j;
+    //int m=0;
+	// load directory sector into buffer
 	readSector(dirbuf, 2);
 	for(i=0; i<512; i+=32)
 	{
 		// search filename in directory
-		if(dirbuf[i] == filename[0] && \
-		   dirbuf[i+1] == filename[1] && \
-		   dirbuf[i+2] == filename[2] && \
-		   dirbuf[i+3] == filename[3] && \
-		   dirbuf[i+4] == filename[4] && \
-		   dirbuf[i+5] == filename[5])
+		if(dirbuf[i] == filename[0] && dirbuf[i+1] == filename[1] && \
+		   dirbuf[i+2] == filename[2] && dirbuf[i+3] == filename[3] && \
+		   dirbuf[i+4] == filename[4] && dirbuf[i+5] == filename[5])
 		{
 			// find occupied sector
 			for(j=i+6; j<(i+32); j++)
 			{
 				if(dirbuf[j] != 0)
 				{
-					readSector((outbuf+m*512), dirbuf[j]);
-					m++;
+					//readSector((outbuf+m*512), dirbuf[j]);
+					//m++;
+					readSector((outbuf+(j-i-6)*512), dirbuf[j]);
 				}
 			}
 		}
 	}
 }
 
+// writeFile supports multi-sector storage
 void writeFile(char* filename, char* inbuf)
 {
 	char mapbuf[512], dirbuf[512];
 	int i, j, n;
+    int sector_index[26];
+    int valid_sector;
 	// load map and directory into buffer
 	readSector(mapbuf, 1);
 	readSector(dirbuf, 2);
-	// search for available sectors
-	for(n=0; n<512; n++)
-	{
-		if(mapbuf[n] == 0)
-		{
-			mapbuf[n] = 0xFF;
-			break;
-		}
-	}
+    for(i=0; i<13312; i+=512)
+    {
+        if(inbuf[i] == 0x00)
+            valid_sector = myDIV(i, 512);
+    }
+	// search for available sectors in map
+    for(j=0; j<valid_sector; j++)
+    {
+        for(n=0; n<512; n++)
+        {
+            if(mapbuf[n] == 0x00)
+            {
+                mapbuf[n] = 0xFF;
+                sector_index[j] = n;
+                break;
+            }
+        }
+    }
 	// search for available file entry in directory
 	for(i=0; i<512; i+=32)
 	{
@@ -237,24 +251,36 @@ void writeFile(char* filename, char* inbuf)
 	{
 		dirbuf[j] = filename[j-i];
 	}
-	// write the occupied sector into file entry
-	dirbuf[j+1] = n;
-
+    // write occupied sector number to entry
+    for(n=0; n<valid_sector; n++)
+    {
+        dirbuf[j+n] = sector_index[n];
+    }
 	writeSector(mapbuf, 1);
 	writeSector(dirbuf, 2);
 	// write data into corresponding sector
-	writeSector(inbuf, dirbuf[j+1]);
+    for(i=0; i<valid_sector; i++)
+    {
+        writeSector((inbuf+i*512), sector_index[i]);
+    }
 }
 
 void executeProgram(char* name, int segment)
 {
-    char filebuf[512];
+    char filebuf[4096];
     int i;
     readFile(name, filebuf);
-    for(i=0; i<512; i++) {
+    for(i=0; i<4096; i++) {
         putInMemory(segment, i, filebuf[i]);
     }
     launchProgram(segment);
+}
+
+void terminate()
+{
+    launchProgram(0x2000);
+    // re-invoke shell to wait for another interaction
+    //interrupt(0x21, 9, "shell", 0x2000, 0);
 }
 
 void handleInterrupt21(int AX, int BX, int CX, int DX)
@@ -271,11 +297,14 @@ void handleInterrupt21(int AX, int BX, int CX, int DX)
 			readSector(BX, CX);
 			break;
 		case 3:
-			printString("List directory:");
+			//printString("List directory:");
 			directory();
 			break;
 		case 4:
 			deleteFile(BX);
+			break;
+		case 5:
+            terminate();
 			break;
 		case 6:
 			// BX is filename, CX is buffer pointer

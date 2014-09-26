@@ -4,13 +4,14 @@
 
 void main()
 {
+    char buffer[20];
+    char filename[6];
+    char readbuf[512];
+    char content[13312];
+    int i, j, k;
+
     while(1)
     {
-        char buffer[20];
-        char filename[6];
-        char readbuf[512];
-        char content[13312];
-        int i, j, k;
         // clear the buffer
         for(i=0; i<20; i++)
             buffer[i] = 0;
@@ -84,8 +85,10 @@ void main()
                 buffer[3] == 'c' && buffer[4] == 'u' && buffer[5] == 't' && \
                 buffer[6] == 'e')
         {
+            for(i=0; i<6; i++)
+                filename[i] = buffer[8+i];
             interrupt(0x21, 0, "\n\r", 0, 0);
-            interrupt(0x21, 9, "tstpr2", 0x3000, 0);
+            interrupt(0x21, 9, filename, 0x3000, 0);
         }
         else {
             interrupt(0x21, 0, "\n\r", 0, 0);

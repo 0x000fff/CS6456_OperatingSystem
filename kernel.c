@@ -21,7 +21,7 @@ void main()
 {
     makeInterrupt21();
     interrupt(0x21, 9, "shell", 0x2000, 0);
-	while(1);
+    while(1);
 }
 
 void printString(char* str)

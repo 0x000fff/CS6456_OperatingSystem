@@ -9,6 +9,9 @@ void main()
     char readbuf[512];
     char content[13312];
     int i, j, k;
+    int procID;
+
+    enableInterrupts();
 
     while(1)
     {
@@ -88,7 +91,14 @@ void main()
             for(i=0; i<6; i++)
                 filename[i] = buffer[8+i];
             interrupt(0x21, 0, "\n\r", 0, 0);
-            interrupt(0x21, 9, filename, 0x3000, 0);
+            interrupt(0x21, 9, filename, 0, 0);
+        }
+        else if(buffer[0] == 'k' && buffer[1] == 'i' && buffer[2] == 'l' && \
+                buffer[3] == 'l')
+        {
+            procID = buffer[5] - '0';
+            interrupt(0x21, 0, "\n\r", 0, 0);
+            interrupt(0x21, 10, procID, 0, 0);
         }
         else {
             interrupt(0x21, 0, "\n\r", 0, 0);
@@ -96,6 +106,4 @@ void main()
             interrupt(0x21, 0, "\n\r", 0, 0);
         }
     }
-    // call terminate()
-    //interrupt(0x21, 5, 0, 0, 0);
 }

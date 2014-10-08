@@ -23,7 +23,6 @@ void writeFile(char* filename, char* inbuf);
 void handleInterrupt21(int AX, int BX, int CX, int DX);
 void executeProgram(char* name);
 void terminate();
-void killProcess(int procID);
 void handleTimerInterrupt(int segment, int sp);
 
 // interrupt() usage:
@@ -40,24 +39,19 @@ void main2()
     }
     makeInterrupt21();
     makeTimerInterrupt();
-    //interrupt(0x21, 9, "tstpr2", 0, 0);
     interrupt(0x21, 9, "shell", 0, 0);
+    //interrupt(0x21, 9, "tstpr2", 0, 0);
     while(1);
 }
 
 void printString(char* str)
 {
 	int i=0;
-
 	while(*(str+i) != '\0')
 	{
 		interrupt(0x10, 0xe*256+*(str+i), 0, 0, 0);
 		i++;
 	}
-
-	// start a new line before printing, use CRLF
-	//interrupt(0x10, 0xe*256+0xd, 0, 0, 0);
-	//interrupt(0x10, 0xe*256+0xa, 0, 0, 0);
 }
 
 void readString(char buffer[])
@@ -158,6 +152,8 @@ void directory()
 			interrupt(0x10, 0xe*256+0xa, 0, 0, 0);
 		}
 	}
+    //interrupt(0x10, 0xe*256+'0'+kproctable[0].isActive, 0, 0, 0);
+    //interrupt(0x10, 0xe*256+'0'+kproctable[1].isActive, 0, 0, 0);
 }
 
 // deleteFile supports multi-sector storage
@@ -236,6 +232,7 @@ void writeFile(char* filename, char* inbuf)
 	int i, j, n;
     int sector_index[26];
     int valid_sector;
+
 	// load map and directory into buffer
 	readSector(mapbuf, 1);
 	readSector(dirbuf, 2);
@@ -282,56 +279,68 @@ void executeProgram(char* name)
 {
     char filebuf[4096];
     int segment;
-    int i, j;
-    readFile(name, filebuf);
+    int i;
+
     setKernelDataSegment();
+
+    readFile(name, filebuf);
+
     for(i=0; i<8; i++)
     {
         if(kproctable[i].isActive == 0)
             break;
     }
-    restoreDataSegment();
-    segment = 0x1000 * (i+2);
-    //CurrentProcess = i;
-    for(j=0; j<4096; j++) {
-        putInMemory(segment, j, filebuf[j]);
-    }
-    // initialize to segment other than kernel
-    initializeProgram(segment);
-    setKernelDataSegment();
     kproctable[i].isActive = 1;
-    restoreDataSegment();
-}
+    segment = 0x1000 * (i+2);
+    CurrentProcess = i;
 
-void killProcess(int procID)
-{
-    setKernelDataSegment();
-    kproctable[procID].isActive = 0;
-    kproctable[procID].sp = 0xFF00;
-    restoreDataSegment();
+    for(i=0; i<4096; i++)
+        putInMemory(segment, i, filebuf[i]);
+
+    //restoreDataSegment();
+    interrupt(0x10, 0xe*256+'0'+kproctable[0].isActive,0,0,0);
+    interrupt(0x10, 0xe*256+'0'+kproctable[1].isActive,0,0,0);
+    switch(segment)
+    {
+        case 0x1000:
+            interrupt(0x10, 0xe*256+'1',0,0,0);
+            break;
+        case 0x2000:
+            interrupt(0x10, 0xe*256+'2',0,0,0);
+            break;
+        case 0x3000:
+            interrupt(0x10, 0xe*256+'3',0,0,0);
+            break;
+        default:
+            interrupt(0x10, 0xe*256+'X',0,0,0);
+            break;
+    };
+    launchProgram(segment);
+    //initializeProgram(segment);
+
+    //restoreDataSegment();
 }
 
 void terminate()
 {
+    /*
     setKernelDataSegment();
     kproctable[ CurrentProcess ].isActive = 0;
     kproctable[ CurrentProcess ].sp = 0xFF00;
     restoreDataSegment();
+    //launchProgram(0x2000);
     while(1);
+    */
+    launchProgram(0x2000);
 }
 
 void handleTimerInterrupt(int segment, int sp)
 {
+/*
     int i;
-    setKernelDataSegment();
-    // avoid passing kernel segment
-    if(segment != 0x1000)
-        kproctable[ CurrentProcess ].sp = sp;
-    restoreDataSegment();
-
-    // round robin
-    setKernelDataSegment();
-    for(i = CurrentProcess + 1; i < (CurrentProcess + 9); i++)
+    //setKernelDataSegment();
+    kproctable[ CurrentProcess ].sp = sp;
+    for(i = CurrentProcess + 1; i < (CurrentProcess + 8); i++)
     {
         if(kproctable[myMOD(i,8)].isActive == 1)
         {
@@ -341,7 +350,10 @@ void handleTimerInterrupt(int segment, int sp)
             break;
         }
     }
-    restoreDataSegment();
+    printString("Tic");
+    returnFromTimer(segment, sp);
+    //restoreDataSegment();
+*/
     returnFromTimer(segment, sp);
 }
 
@@ -380,10 +392,6 @@ void handleInterrupt21(int AX, int BX, int CX, int DX)
 			break;
 		case 9:
 			executeProgram(BX);
-			break;
-		case 10:
-            // BX is int not char.
-			killProcess(BX);
 			break;
 		default:
 			printString("Syscall not supported");

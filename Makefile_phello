@@ -1,0 +1,5 @@
+all:
+	nasm bootload.asm
+	bcc -ansi -c -o phello.o phello.c
+	as86 lib.asm -o lib.o
+	ld86 -o phello -d phello.o lib.o

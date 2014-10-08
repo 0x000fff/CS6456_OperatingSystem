@@ -363,7 +363,7 @@ void handleInterrupt21(int AX, int BX, int CX, int DX)
 			directory();
 			break;
 		case 4:
-			deleteFile(BX);
+		    deleteFile(BX);
 			break;
 		case 5:
             terminate();

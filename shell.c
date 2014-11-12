@@ -1,6 +1,8 @@
 /*
  * shell.c
  */
+#define true  1
+#define false 0
 
 void main()
 {
@@ -18,6 +20,18 @@ void main()
         // clear the buffer
         for(i=0; i<20; i++)
             buffer[i] = 0;
+
+        // clear the filename
+        for(i=0; i<6; i++)
+            filename[i] = 0;
+
+        // clear the readbuf
+        for(i=0; i<512; i++)
+            readbuf[i] = 0;
+
+        // clear the content
+        for(i=0; i<13312; i++)
+            content[i] = 0;
 
         // call printString()
         interrupt(0x21, 0, "SHELL> ", 0, 0);
@@ -89,7 +103,13 @@ void main()
                 buffer[6] == 'e')
         {
             for(i=0; i<6; i++)
-                filename[i] = buffer[8+i];
+            {
+                // wipe CRLF
+                if(buffer[8+i] == 0xa || buffer[8+i] == 0xd)
+                    filename[i] = 0;
+                else
+                    filename[i] = buffer[8+i];
+            }
             interrupt(0x21, 0, "\n\r", 0, 0);
             interrupt(0x21, 9, filename, 0, 0);
         }

@@ -9,7 +9,8 @@ void main()
     char buffer[20];
     char filename[6];
     char readbuf[512];
-    char content[13312];
+    char content[12800];
+    char path[7];
     int i, j, k;
     int procID;
 
@@ -30,11 +31,17 @@ void main()
             readbuf[i] = 0;
 
         // clear the content
-        for(i=0; i<13312; i++)
+        for(i=0; i<12800; i++)
             content[i] = 0;
 
+        // clear input path
+        for(i=0; i<15; i++)
+            path[i] = 0;
+
         // call printString()
-        interrupt(0x21, 0, "SHELL> ", 0, 0);
+        interrupt(0x21, 0, "SHELL:", 0, 0);
+        interrupt(0x21, 14, 0, 0, 0);
+        interrupt(0x21, 0, "> ", 0, 0);
         // call readString()
         interrupt(0x21, 1, buffer, 0, 0);
         // handle dir
@@ -119,6 +126,28 @@ void main()
             procID = buffer[5] - '0';
             interrupt(0x21, 0, "\n\r", 0, 0);
             interrupt(0x21, 10, procID, 0, 0);
+        }
+        else if(buffer[0] == 'c' && buffer[1] == 'd')
+        {
+            interrupt(0x21, 0, "\n\r", 0, 0);
+            if(buffer[3] == '/') {
+                for(i=0; i<7; ++i) {
+                    if(buffer[3+i] == 0xa || buffer[3+i] == 0xd)
+                        path[i] = 0;
+                    else
+                        path[i] = buffer[3+i];
+                }
+            }
+            else {
+                path[0] = '/';
+                for(i=0; i<6; ++i) {
+                    if(buffer[3+i] == 0xa || buffer[3+i] == 0xd)
+                        path[1+i] = 0;
+                    else
+                        path[1+i] = buffer[3+i];
+                }
+            }
+            interrupt(0x21, 13, path, 0, 0);
         }
         else {
             interrupt(0x21, 0, "\n\r", 0, 0);

@@ -12,7 +12,7 @@ struct procTable
 } kproctable[7];
 int CurrentProcess;
 
-char curPath[7];
+char curPath[7][7];
 int dirSect;
 
 void printString(char* str);
@@ -36,13 +36,14 @@ void handleTimerInterrupt(int segment, int sp);
 //void getMessage(char* msg);
 void createSubDir(char* dirname);
 void changeParentDir();
+void getCurProcID();
 
 // interrupt() usage:
 // int interrupt (int number, int AX, int BX, int CX, int DX)
 
 void main2()
 {
-    int i;
+    int i, j;
     CurrentProcess = 0;
     for(i=0; i<7; i++)
     {
@@ -51,8 +52,15 @@ void main2()
     }
 
     for(i=0; i<7; i++)
-        curPath[i] = 0;
-    curPath[0] = '/';
+    {
+        for(j=0; j<7; ++j)
+        {
+            if(j == 0)
+                curPath[i][0] = '/';
+            else
+                curPath[i][j] = 0;
+        }
+    }
     // sector number of root directory
     dirSect = 2;
 
@@ -191,6 +199,7 @@ void changeDir(char* pathName)
     int index, i, j;
     int sectindex;
     int dfIndicator;
+    int curps;
     char tmpchar;
 	char dirbuf[512];
 
@@ -198,17 +207,21 @@ void changeDir(char* pathName)
     dfIndicator = 0;
     tmpchar = 0;
 
+    setKernelDataSegment();
+    curps = CurrentProcess;
+    restoreDataSegment();
+
     if(pathName[0] == '/' && pathName[1] != 0) {
         readSector(dirbuf, 2);
     }
     else if(pathName[0] == '/' && pathName[1] == 0) {
         setKernelDataSegment();
-        curPath[0] = '/';
+        curPath[curps][0] = '/';
         restoreDataSegment();
         for(index=1; index<7; ++index)
         {
             setKernelDataSegment();
-            curPath[index] = 0;
+            curPath[curps][index] = 0;
             restoreDataSegment();
         }
         setKernelDataSegment();
@@ -247,7 +260,7 @@ void changeDir(char* pathName)
         {
             tmpchar = pathName[index];
             setKernelDataSegment();
-            curPath[index] = tmpchar;
+            curPath[curps][index] = tmpchar;
             restoreDataSegment();
         }
 
@@ -266,9 +279,34 @@ void changeDir(char* pathName)
 
 void getCurDir()
 {
+    int curps;
+    int i;
+    char tmpCurPath[7];
+    char tmpch;
     setKernelDataSegment();
-    printString(curPath);
+    curps = CurrentProcess;
     restoreDataSegment();
+
+    for(i=0; i<7; ++i)
+    {
+        setKernelDataSegment();
+        tmpch = curPath[curps][i];
+        restoreDataSegment();
+        tmpCurPath[i] = tmpch;
+    }
+
+    printString(tmpCurPath);
+}
+
+void getCurProcID()
+{
+    char curps[2];
+    setKernelDataSegment();
+    curps[0] = CurrentProcess;
+    restoreDataSegment();
+    curps[0] = curps[0] + '0';
+    curps[1] = 0;
+    printString(curps);
 }
 
 // deleteFile supports multi-sector storage
@@ -401,11 +439,13 @@ void createSubDir(char* dirname)
     int freedirentry;
     int availsect;
     int curdirsect;
+    int curps;
 
 	readSector(mapbuf, 1);
 
     // load directory sector into buffer
     setKernelDataSegment();
+    curps = CurrentProcess;
     curdirsect = dirSect;
     restoreDataSegment();
     readSector(dirbuf, curdirsect);
@@ -443,7 +483,7 @@ void createSubDir(char* dirname)
     for(i=0; i<7; ++i)
     {
         setKernelDataSegment();
-        tmpchar = curPath[i];
+        tmpchar = curPath[curps][i];
         restoreDataSegment();
         subdirbuf[480+i] = tmpchar;
     }
@@ -460,9 +500,11 @@ void changeParentDir()
     char dirbuf[512];
     int i;
     char tmpchar;
+    int curps;
 
     // load directory sector into buffer
     setKernelDataSegment();
+    curps = CurrentProcess;
     curdirsect = dirSect;
     restoreDataSegment();
     readSector(dirbuf, curdirsect);
@@ -475,7 +517,7 @@ void changeParentDir()
     {
         tmpchar = dirbuf[480+i];
         setKernelDataSegment();
-        curPath[i] = tmpchar;
+        curPath[curps][i] = tmpchar;
         restoreDataSegment();
     }
 }
@@ -687,6 +729,9 @@ void handleInterrupt21(int AX, int BX, int CX, int DX)
 			break;
 		case 16:
             changeParentDir();
+			break;
+		case 17:
+            getCurProcID();
 			break;
 		default:
 			printString("Syscall not supported");

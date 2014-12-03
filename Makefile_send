@@ -1,0 +1,5 @@
+all:
+	nasm bootload.asm
+	bcc -ansi -c -o send.o send.c
+	as86 lib.asm -o lib.o
+	ld86 -o send -d send.o lib.o

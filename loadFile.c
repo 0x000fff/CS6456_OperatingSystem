@@ -5,8 +5,11 @@
 //This should be compiled with gcc and run outside of the OS
 
 #include <stdio.h>
+#include <string.h>
+#define PLAINFILE 0x01
+#define SUBDIR    0x02
 
-main(int argc, char* argv[])
+int main(int argc, char* argv[])
 {
 	int i;
 
@@ -56,6 +59,7 @@ main(int argc, char* argv[])
 		return;
 	}
 	int dirindex=i;
+    int entryend = dirindex + 31;
 
 	//fill the name field with 00s first
 	for (i=0; i<6; i++)
@@ -74,7 +78,7 @@ main(int argc, char* argv[])
 	int sectcount=0;
 	while(!feof(loadFil))
 	{
-		if (sectcount==26)
+		if (sectcount==25)
 		{
 			printf("Not enough space in directory entry for file\n");
 			return;
@@ -111,19 +115,20 @@ main(int argc, char* argv[])
 			{
 				char c = fgetc(loadFil);
 				fputc(c, floppy);
-			}	
+			}
 		}
 	}
 
 	//write the map and directory back to the floppy image
-        fseek(floppy,512,SEEK_SET);
-        for(i=0; i<512; i++)
-		fputc(map[i],floppy);
-        
-        fseek(floppy,512*2,SEEK_SET);
-        for (i=0; i<512; i++)
-		fputc(dir[i],floppy);
+    fseek(floppy,512,SEEK_SET);
+    for(i=0; i<512; i++)
+    fputc(map[i],floppy);
+
+    fseek(floppy,512*2,SEEK_SET);
+    for (i=0; i<512; i++)
+    fputc(dir[i],floppy);
 
 	fclose(floppy);
 	fclose(loadFil);
+    return 0;
 }

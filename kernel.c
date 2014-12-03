@@ -1,4 +1,6 @@
 #define true 1
+#define PLAINFILE 0x01
+#define SUBDIR    0x02
 
 void main2();
 void main() { main2(); }
@@ -7,8 +9,11 @@ struct procTable
 {
     int isActive;
     int sp;
-} kproctable[8];
+} kproctable[7];
 int CurrentProcess;
+
+char curPath[7];
+int dirSect;
 
 void printString(char* str);
 void readString(char buffer[]);
@@ -17,6 +22,8 @@ void writeSector(char* buffer, int sector);
 int myDIV(int dividend, int divisor);
 int myMOD(int dividend, int divisor);
 void directory();
+void changeDir(char* pathName);
+void getCurDir();
 void deleteFile(char* filename);
 void readFile(char* filename, char* outbuf);
 void writeFile(char* filename, char* inbuf);
@@ -25,6 +32,10 @@ void executeProgram(char* name);
 void terminate();
 void killProcess(int procID);
 void handleTimerInterrupt(int segment, int sp);
+//void sendMessage(char* msg, int processNum);
+//void getMessage(char* msg);
+void createSubDir(char* dirname);
+void changeParentDir();
 
 // interrupt() usage:
 // int interrupt (int number, int AX, int BX, int CX, int DX)
@@ -33,14 +44,23 @@ void main2()
 {
     int i;
     CurrentProcess = 0;
-    for(i=0; i<8; i++)
+    for(i=0; i<7; i++)
     {
         kproctable[i].isActive = 0;
         kproctable[i].sp = 0xFF00;
     }
+
+    for(i=0; i<7; i++)
+        curPath[i] = 0;
+    curPath[0] = '/';
+    // sector number of root directory
+    dirSect = 2;
+
+    for(i=0; i<0x6700; ++i)
+        putInMemory(0x9000, i, 0);
+
     makeInterrupt21();
     makeTimerInterrupt();
-    //interrupt(0x21, 9, "tstpr2", 0, 0);
     interrupt(0x21, 9, "shell", 0, 0);
     while(1);
 }
@@ -54,10 +74,6 @@ void printString(char* str)
 		interrupt(0x10, 0xe*256+*(str+i), 0, 0, 0);
 		i++;
 	}
-
-	// start a new line before printing, use CRLF
-	//interrupt(0x10, 0xe*256+0xd, 0, 0, 0);
-	//interrupt(0x10, 0xe*256+0xa, 0, 0, 0);
 }
 
 void readString(char buffer[])
@@ -141,92 +157,190 @@ int myMOD(int dividend, int divisor)
 
 void directory()
 {
-	int p_row, p_col;
-	char dirbuf[512];
-	// read out the whole sector #2
-	readSector(dirbuf, 2);
-	// search the beginning of every 32 bytes
-	for(p_row=0; p_row<512; p_row+=32)
-	{
-		if(dirbuf[p_row] != 0)
-		{
-			// read out the first 6 bytes of each file entry and print
-			for(p_col=p_row; p_col<(p_row+6); p_col++)
-				interrupt(0x10, 0xe*256 + dirbuf[p_col], 0, 0, 0);
+    int p_row, p_col;
+    int sectNum;
+    int looprange;
+    char dirbuf[512];
+    setKernelDataSegment();
+    sectNum = dirSect;
+    restoreDataSegment();
+    readSector(dirbuf, sectNum);
+    if(sectNum == 2) {
+        looprange = 512;
+    }
+    else {
+        looprange = 480;
+    }
+    // search the beginning of every 32 bytes
+    for(p_row=0; p_row < looprange; p_row+=32)
+    {
+        if(dirbuf[p_row] != 0)
+        {
+            // read out the first 6 bytes of each file entry and print
+            for(p_col=p_row; p_col<(p_row+6); p_col++)
+                interrupt(0x10, 0xe*256 + dirbuf[p_col], 0, 0, 0);
 
-			interrupt(0x10, 0xe*256+0xd, 0, 0, 0);
-			interrupt(0x10, 0xe*256+0xa, 0, 0, 0);
-		}
-	}
+            interrupt(0x10, 0xe*256+0xd, 0, 0, 0);
+            interrupt(0x10, 0xe*256+0xa, 0, 0, 0);
+        }
+    }
+}
+
+void changeDir(char* pathName)
+{
+    int index, i, j;
+    int sectindex;
+    int dfIndicator;
+    char tmpchar;
+	char dirbuf[512];
+
+    sectindex = 0;
+    dfIndicator = 0;
+    tmpchar = 0;
+
+    if(pathName[0] == '/' && pathName[1] != 0) {
+        readSector(dirbuf, 2);
+    }
+    else if(pathName[0] == '/' && pathName[1] == 0) {
+        setKernelDataSegment();
+        curPath[0] = '/';
+        restoreDataSegment();
+        for(index=1; index<7; ++index)
+        {
+            setKernelDataSegment();
+            curPath[index] = 0;
+            restoreDataSegment();
+        }
+        setKernelDataSegment();
+        dirSect = 2;
+        restoreDataSegment();
+        return;
+    }
+    else {
+        return;
+    }
+
+    for(i=0; i<512; i+=32)
+    {
+        // search filename in directory
+        if(dirbuf[i] == pathName[1] && dirbuf[i+1] == pathName[2] && \
+           dirbuf[i+2] == pathName[3] && dirbuf[i+3] == pathName[4] && \
+           dirbuf[i+4] == pathName[5] && dirbuf[i+5] == pathName[6])
+        {
+            // find occupied sector
+            for(j=i+6; j<(i+31); j++)
+            {
+                if(dirbuf[j] != 0)
+                {
+                    sectindex = dirbuf[j];
+                    dfIndicator = dirbuf[i+31];
+                    // subdir only occupies one sector
+                    break;
+                }
+            }
+        }
+    }
+
+    if(dfIndicator == 0x02)
+    {
+        for(index=0; index<7; ++index)
+        {
+            tmpchar = pathName[index];
+            setKernelDataSegment();
+            curPath[index] = tmpchar;
+            restoreDataSegment();
+        }
+
+        setKernelDataSegment();
+        dirSect = sectindex;
+        restoreDataSegment();
+    }
+    else
+    {
+        printString(pathName);
+        setKernelDataSegment();
+        printString(" is not a directory\n\r");
+        restoreDataSegment();
+    }
+}
+
+void getCurDir()
+{
+    setKernelDataSegment();
+    printString(curPath);
+    restoreDataSegment();
 }
 
 // deleteFile supports multi-sector storage
 void deleteFile(char* filename)
 {
-	char mapbuf[512], dirbuf[512];
-	// use static to initialize with all zero
-	static char zerobuf[512];
-	int i, j, n;
-	// load map and directory into buffer
-	readSector(mapbuf, 1);
-	readSector(dirbuf, 2);
-	for(i=0; i<512; i+=32)
-	{
-		// search filename in directory
-		if(dirbuf[i] == filename[0] && dirbuf[i+1] == filename[1] && \
-		   dirbuf[i+2] == filename[2] && dirbuf[i+3] == filename[3] && \
+    char mapbuf[512], dirbuf[512];
+    // use static to initialize with all zero
+    static char zerobuf[512];
+    int i, j, n;
+    // load map and directory into buffer
+    readSector(mapbuf, 1);
+    readSector(dirbuf, 2);
+    for(i=0; i<512; i+=32)
+    {
+        // search filename in directory
+        if(dirbuf[i] == filename[0] && dirbuf[i+1] == filename[1] && \
+           dirbuf[i+2] == filename[2] && dirbuf[i+3] == filename[3] && \
            dirbuf[i+4] == filename[4] && dirbuf[i+5] == filename[5])
-		{
-			// delete file name in entry in directory
+        {
+            // delete file name in entry in directory
             for(n=i; n<(i+6); n++)
             {
                 dirbuf[n] = 0x00;
             }
-			// find occupied sector
-			for(j=i+6; j<(i+32); j++)
-			{
-				// erase corresponding sector
-				if(dirbuf[j] != 0x00)
-				{
-					writeSector(zerobuf, dirbuf[j]);
-					// update map in sector #1
-					mapbuf[dirbuf[j]] = 0x00;
-				}
-			}
-		}
-	}
-	// write back to update disk
-	writeSector(mapbuf, 1);
-	writeSector(dirbuf, 2);
+            // find occupied sector
+            for(j=i+6; j<(i+31); j++)
+            {
+                // erase corresponding sector
+                if(dirbuf[j] != 0x00)
+                {
+                    writeSector(zerobuf, dirbuf[j]);
+                    // update map in sector #1
+                    mapbuf[dirbuf[j]] = 0x00;
+                }
+            }
+            // clear directory/file flag
+            dirbuf[i+32] = 0x00;
+        }
+    }
+    // write back to update disk
+    writeSector(mapbuf, 1);
+    writeSector(dirbuf, 2);
 }
 
 // readFile supports multi-sector storage
 void readFile(char* filename, char* outbuf)
 {
-	char dirbuf[512];
-	int i, j;
-    //int m=0;
-	// load directory sector into buffer
-	readSector(dirbuf, 2);
-	for(i=0; i<512; i+=32)
-	{
-		// search filename in directory
-		if(dirbuf[i] == filename[0] && dirbuf[i+1] == filename[1] && \
-		   dirbuf[i+2] == filename[2] && dirbuf[i+3] == filename[3] && \
-		   dirbuf[i+4] == filename[4] && dirbuf[i+5] == filename[5])
-		{
-			// find occupied sector
-			for(j=i+6; j<(i+32); j++)
-			{
-				if(dirbuf[j] != 0)
-				{
-					//readSector((outbuf+m*512), dirbuf[j]);
-					//m++;
-					readSector((outbuf+(j-i-6)*512), dirbuf[j]);
-				}
-			}
-		}
-	}
+    char dirbuf[512];
+    int i, j;
+    int sectindex;
+    // load directory sector into buffer
+    setKernelDataSegment();
+    sectindex = dirSect;
+    restoreDataSegment();
+    readSector(dirbuf, sectindex);
+    for(i=0; i<512; i+=32)
+    {
+        // search filename in directory
+        if(dirbuf[i] == filename[0] && dirbuf[i+1] == filename[1] && \
+           dirbuf[i+2] == filename[2] && dirbuf[i+3] == filename[3] && \
+           dirbuf[i+4] == filename[4] && dirbuf[i+5] == filename[5])
+        {
+            // find occupied sector
+            for(j=i+6; j<(i+31); j++)
+            {
+                if(dirbuf[j] != 0)
+                {
+                    readSector((outbuf+(j-i-6)*512), dirbuf[j]);
+                }
+            }
+        }
+    }
 }
 
 // writeFile supports multi-sector storage
@@ -234,12 +348,12 @@ void writeFile(char* filename, char* inbuf)
 {
 	char mapbuf[512], dirbuf[512];
 	int i, j, n;
-    int sector_index[26];
+    int sector_index[25];
     int valid_sector;
 	// load map and directory into buffer
 	readSector(mapbuf, 1);
 	readSector(dirbuf, 2);
-    for(i=0; i<13312; i+=512)
+    for(i=0; i<12800; i+=512)
     {
         if(inbuf[i] == 0x00)
             valid_sector = myDIV(i, 512);
@@ -268,14 +382,102 @@ void writeFile(char* filename, char* inbuf)
 		dirbuf[j] = filename[j-i];
 
     // write occupied sector number to entry
-    for(n=0; n<valid_sector; n++)
+    for(n=0; n < valid_sector; n++)
         dirbuf[j+n] = sector_index[n];
 
 	writeSector(mapbuf, 1);
 	writeSector(dirbuf, 2);
 	// write data into corresponding sector
-    for(i=0; i<valid_sector; i++)
+    for(i=0; i < valid_sector; i++)
         writeSector((inbuf+i*512), sector_index[i]);
+}
+
+void createSubDir(char* dirname)
+{
+	char mapbuf[512], dirbuf[512];
+    char subdirbuf[512];
+    char tmpchar;
+	int i;
+    int freedirentry;
+    int availsect;
+    int curdirsect;
+
+	readSector(mapbuf, 1);
+
+    // load directory sector into buffer
+    setKernelDataSegment();
+    curdirsect = dirSect;
+    restoreDataSegment();
+    readSector(dirbuf, curdirsect);
+
+    // search for available entry in dir sector
+    for(i=0; i<512; i+=32)
+    {
+        if(dirbuf[i] == 0x00)
+        {
+            freedirentry = i;
+            break;
+        }
+    }
+
+    // copy folder name into dir sector, and mark as subdir.
+    for(i=0; i<6; ++i)
+    {
+        dirbuf[freedirentry + i] = dirname[i];
+    }
+    dirbuf[freedirentry + 31] = SUBDIR;
+
+    // search for available sector for this subdir
+    for(i=0; i<512; ++i)
+    {
+        if(mapbuf[i] == 0x00)
+        {
+            availsect = i;
+            mapbuf[i] = 0xFF;
+            break;
+        }
+    }
+    dirbuf[freedirentry + 6] = availsect;
+    readSector(subdirbuf, availsect);
+    // store the subdir's parent directory
+    for(i=0; i<7; ++i)
+    {
+        setKernelDataSegment();
+        tmpchar = curPath[i];
+        restoreDataSegment();
+        subdirbuf[480+i] = tmpchar;
+    }
+    subdirbuf[510] = curdirsect;
+	writeSector(subdirbuf, availsect);
+
+	writeSector(mapbuf, 1);
+	writeSector(dirbuf, curdirsect);
+}
+
+void changeParentDir()
+{
+    int curdirsect;
+    char dirbuf[512];
+    int i;
+    char tmpchar;
+
+    // load directory sector into buffer
+    setKernelDataSegment();
+    curdirsect = dirSect;
+    restoreDataSegment();
+    readSector(dirbuf, curdirsect);
+    curdirsect = dirbuf[510];
+
+    setKernelDataSegment();
+    dirSect = curdirsect;
+    restoreDataSegment();
+    for(i=0; i<7; ++i)
+    {
+        tmpchar = dirbuf[480+i];
+        setKernelDataSegment();
+        curPath[i] = tmpchar;
+        restoreDataSegment();
+    }
 }
 
 void executeProgram(char* name)
@@ -285,7 +487,7 @@ void executeProgram(char* name)
     int i, j;
     readFile(name, filebuf);
     setKernelDataSegment();
-    for(i=0; i<8; i++)
+    for(i=0; i<7; i++)
     {
         if(kproctable[i].isActive == 0)
             break;
@@ -299,6 +501,7 @@ void executeProgram(char* name)
     // initialize to segment other than kernel
     initializeProgram(segment);
     setKernelDataSegment();
+    kproctable[i].sp = 0xFF00;
     kproctable[i].isActive = 1;
     restoreDataSegment();
 }
@@ -331,11 +534,11 @@ void handleTimerInterrupt(int segment, int sp)
 
     // round robin
     setKernelDataSegment();
-    for(i = CurrentProcess + 1; i < (CurrentProcess + 9); i++)
+    for(i = CurrentProcess + 1; i < (CurrentProcess + 8); i++)
     {
-        if(kproctable[myMOD(i,8)].isActive == 1)
+        if(kproctable[myMOD(i,7)].isActive == 1)
         {
-            CurrentProcess = myMOD(i,8);
+            CurrentProcess = myMOD(i,7);
             segment = 0x1000 * (CurrentProcess + 2);
             sp = kproctable[ CurrentProcess ].sp;
             break;
@@ -344,6 +547,88 @@ void handleTimerInterrupt(int segment, int sp)
     restoreDataSegment();
     returnFromTimer(segment, sp);
 }
+
+/*
+void sendMessage(char* msg, int processNum)
+{
+    int curProc;
+    int mboxaddr;
+    int inboxp;
+    int fullp;
+    unsigned char timestamp;
+    setKernelDataSegment();
+    curProc = CurrentProcess;
+    restoreDataSegment();
+
+    mboxaddr = 0x1000 * processNum + 0x0100 * curProc;
+    // check previous full flag, reset timestamp and flag
+    if(readFromMemory(0x9000, mboxaddr) == 1) {
+        putInMemory(0x9000, mboxaddr + 102, 0);
+        putInMemory(0x9000, mboxaddr, 0);
+    }
+
+    for(inboxp=0; inboxp<100; ++inboxp)
+        putInMemory(0x9000, mboxaddr+(2+inboxp), msg[inboxp]);
+
+    // set full flag
+    putInMemory(0x9000, mboxaddr, 1);
+
+    // update timestamp
+    for(fullp=0; fullp<7; ++fullp)
+    {
+        if(readFromMemory(0x9000, 0x1000*processNum + fullp*0x0100) == 1)
+        {
+            timestamp = readFromMemory(0x9000, 0x1000*processNum + fullp*0x0100 + 102);
+            putInMemory(0x9000, 0x1000*processNum + fullp*0x0100 + 102, timestamp+1);
+        }
+    }
+}
+
+void getMessage(char* msg)
+{
+    int curProc;
+    int timep;
+    unsigned char timestamp;
+    unsigned char oldest;
+    int oldestindex;
+    int inboxp;
+    int notempty, fullp;
+    notempty = 0;
+
+    setKernelDataSegment();
+    curProc = CurrentProcess;
+    restoreDataSegment();
+
+    oldest = readFromMemory(0x9000, 0x1000*curProc+102);
+    oldestindex = 0;
+
+    while(!notempty)
+    {
+        for(fullp=0; fullp<7; ++fullp)
+            notempty += (int)readFromMemory(0x9000, 0x1000*curProc + 0x0100*fullp);
+    }
+
+    for(timep=1; timep<7; ++timep)
+    {
+        timestamp = readFromMemory(0x9000, 0x1000*curProc + 0x0100*timep + 102);
+        if(timestamp > oldest)
+        {
+            oldestindex = timep;
+            oldest = timestamp;
+        }
+    }
+    for(inboxp=0; inboxp<100; ++inboxp)
+    {
+        msg[inboxp] = readFromMemory(0x9000, 0x1000*curProc + 0x0100*oldestindex + 2 + inboxp);
+    }
+    for(inboxp=0; inboxp<100; ++inboxp)
+    {
+        putInMemory(0x9000, 0x1000*curProc + 0x0100*oldestindex + 2 + inboxp, 0);
+    }
+    putInMemory(0x9000, 0x1000*curProc + 0x0100*oldestindex + 102, 0);
+    putInMemory(0x9000, 0x1000*curProc + 0x0100*oldestindex, 0);
+}
+*/
 
 void handleInterrupt21(int AX, int BX, int CX, int DX)
 {
@@ -384,6 +669,24 @@ void handleInterrupt21(int AX, int BX, int CX, int DX)
 		case 10:
             // BX is int not char.
 			killProcess(BX);
+			break;
+		case 11:
+            //sendMessage(BX, CX);
+			break;
+		case 12:
+            //getMessage(BX);
+			break;
+		case 13:
+            changeDir(BX);
+			break;
+		case 14:
+            getCurDir();
+			break;
+		case 15:
+            createSubDir(BX);
+			break;
+		case 16:
+            changeParentDir();
 			break;
 		default:
 			printString("Syscall not supported");

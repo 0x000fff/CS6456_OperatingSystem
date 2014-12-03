@@ -1,0 +1,5 @@
+all:
+	nasm bootload.asm
+	bcc -ansi -c -o receiv.o receiv.c
+	as86 lib.asm -o lib.o
+	ld86 -o receiv -d receiv.o lib.o

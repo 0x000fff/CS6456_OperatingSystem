@@ -1,4 +1,4 @@
-CS6456_OperatingSystem
+CS6456_Operating_System
 ======================
 
 Grad OS project work, a 16-bit x86 OS.
